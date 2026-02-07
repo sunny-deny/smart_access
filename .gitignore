@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# QGIS / GIS temporary files
+*.qgz~
+*.qgs~
+*.aux.xml
+*.tfw
+*.ovr
+
+# Raw data
+data/*
+!data/README.md
+
+# Generated output
+output/*
+!output/README.md
+
+# Logs
+*.log
+
+# Temporary folders
+temp/
+tmp/

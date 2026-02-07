@@ -1,0 +1,12 @@
+geopandas
+osmnx
+networkx
+scikit-learn
+shapely
+pyproj
+fiona
+rasterio
+matplotlib
+pandas
+numpy
+requests
