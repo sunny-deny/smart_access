@@ -1,115 +1,82 @@
 import os
-import numpy as np
-import geopandas as gpd
+import sys
+from qgis.core import QgsApplication, QgsProject, QgsVectorLayer, QgsRasterLayer
+from qgis.analysis import QgsNativeAlgorithms
+import processing
 
-from .utils_qgis import add_layer_to_project
-
-def _safe(s: str) -> str:
-    return s.lower().replace(" ", "_")
-
-
-def _make_grid(bounds, cell_size):
-    minx, miny, maxx, maxy = bounds
-    xs = np.arange(minx, maxx, cell_size)
-    ys = np.arange(miny, maxy, cell_size)
-
-    polys = []
-    for x in xs:
-        for y in ys:
-            polys.append(
-                gpd.GeoSeries.from_wkt(
-                    [f"POLYGON(({x} {y},{x+cell_size} {y},{x+cell_size} {y+cell_size},{x} {y+cell_size},{x} {y}))"]
-                ).iloc[0]
-            )
-    return polys
+try:
+    from .init_qgis import init_qgis
+except ImportError:
+    from init_qgis import init_qgis
 
 
-def extract_heatmap(
-    municipality: str,
-    category: str | None,
-    pois_gpkg: str,
-    pois_layer: str,
-    polygon_gpkg: str,
-    polygon_layer: str,
-    output_base: str,
-    cell_size_m: int = 250,
-    epsg_work: int = 3763,
-    add_to_qgis: bool = True,
+def extract_heatmap_qgis(
+    municipality,
+    category,
+    pois_gpkg,
+    pois_layer,
+    output_base,
+    project_path=None,
+    radius=500,
+    pixel_size=10,
+    add_to_project=True,
 ):
     if not os.path.exists(pois_gpkg):
-        return f"[ERROR] POIs file not found: {pois_gpkg}"
+        return f"[ERROR] POIs not found: {pois_gpkg}"
 
-    if not os.path.exists(polygon_gpkg):
-        return f"[ERROR] Polygon file not found: {polygon_gpkg}"
-
-    pois = gpd.read_file(pois_gpkg, layer=pois_layer)
-    poly = gpd.read_file(polygon_gpkg, layer=polygon_layer)
-
-    pois.columns = pois.columns.str.lower()
-    poly.columns = poly.columns.str.lower()
-
-    if pois.empty:
-        return "[ERROR] POIs layer is empty."
-
-    if poly.empty:
-        return "[ERROR] Polygon layer is empty."
-
-    if pois.crs is None or poly.crs is None:
-        return "[ERROR] Missing CRS in POIs or polygon."
-
-    pois = pois.to_crs(epsg=epsg_work)
-    poly = poly.to_crs(epsg=epsg_work)
-
-    if category:
-        c = category.lower()
-        if "category" not in pois.columns:
-            return "[ERROR] Column 'category' not found in POIs."
-        pois = pois[pois["category"] == c].copy()
-        if pois.empty:
-            return f"[INFO] No POIs for category '{category}'."
-    else:
-        c = "all"
-
-    area_geom = poly.geometry.unary_union
-    bounds = area_geom.bounds
-
-    grid_geoms = _make_grid(bounds, cell_size_m)
-    grid = gpd.GeoDataFrame({"cell_id": range(len(grid_geoms))}, geometry=grid_geoms, crs=pois.crs)
-
-    grid = grid[grid.intersects(area_geom)].copy()
-    grid["geometry"] = grid.geometry.intersection(area_geom)
-
-    join = gpd.sjoin(pois[["geometry"]], grid[["cell_id", "geometry"]], predicate="within", how="left")
-    counts = join.groupby("cell_id").size()
-
-    grid["poi_count"] = grid["cell_id"].map(counts).fillna(0).astype(int)
-    grid["area_m2"] = grid.geometry.area
-    grid["density_km2"] = (grid["poi_count"] / (grid["area_m2"] / 1_000_000)).replace([np.inf, -np.inf], 0).fillna(0)
-
-    grid = grid.to_crs(epsg=4326)
-
-    mun_safe = _safe(municipality)
-    out_dir = os.path.join(output_base, "heatmaps", mun_safe)
+    out_dir = os.path.join(output_base, "heatmaps", municipality.lower().replace(" ", "_"))
     os.makedirs(out_dir, exist_ok=True)
 
-    out_path = os.path.join(out_dir, f"heatmap_{mun_safe}_{c}_{cell_size_m}m.gpkg")
-    out_layer = "heatmap"
+    suffix = category.lower() if category else "all"
+    heatmap_path = os.path.join(out_dir, f"{suffix}_heatmap.tif")
 
-    if os.path.exists(out_path):
-        try:
-            os.remove(out_path)
-        except PermissionError:
-            return "[ERROR] Output file is open in QGIS. Close it and retry."
+    qgs = init_qgis()
+    QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
 
-    grid.to_file(out_path, layer=out_layer, driver="GPKG")
+    project = QgsProject.instance()
+    if project_path:
+        if not os.path.exists(project_path):
+            qgs.exitQgis()
+            return f"[ERROR] Project not found: {project_path}"
+        project.read(project_path)
 
-    if add_to_qgis:
-        try:
-            add_layer_to_project(out_path, out_layer, f"Heatmap {c} - {municipality} ({cell_size_m}m)")
-        except Exception:
-            pass
+    uri = f"{pois_gpkg}|layername={pois_layer}"
+    layer = QgsVectorLayer(uri, f"pois_{municipality}", "ogr")
+    if not layer.isValid():
+        qgs.exitQgis()
+        return f"[ERROR] Could not load POIs layer: {pois_gpkg} ({pois_layer})"
 
-    return f"[SUCCESS] Heatmap exported: {out_path}"
+    if category:
+        if "category" not in [f.name() for f in layer.fields()]:
+            qgs.exitQgis()
+            return "[ERROR] Field 'category' not found in POIs."
+        layer.setSubsetString(f"\"category\" = '{category.lower()}'")
+
+    try:
+        processing.run("qgis:heatmapkerneldensityestimation", {
+            "INPUT": layer,
+            "RADIUS": radius,
+            "PIXEL_SIZE": pixel_size,
+            "WEIGHT_FIELD": "",
+            "KERNEL": 0,
+            "DECAY": 0,
+            "OUTPUT_VALUE": 0,
+            "OUTPUT": heatmap_path,
+        })
+    except Exception as e:
+        qgs.exitQgis()
+        return f"[ERROR] Heatmap processing failed: {e}"
+
+    if add_to_project:
+        raster = QgsRasterLayer(heatmap_path, f"heatmap_{suffix}_{municipality}")
+        if raster.isValid():
+            project.addMapLayer(raster)
+
+    if project_path:
+        project.write()
+
+    qgs.exitQgis()
+    return f"[SUCCESS] Heatmap exported: {heatmap_path}"
 
 
 if __name__ == "__main__":
@@ -119,18 +86,22 @@ if __name__ == "__main__":
     mun_safe = municipality.lower().replace(" ", "_")
 
     pois_gpkg = os.path.join(base_dir, "output", mun_safe, "pois_all.gpkg")
-    polygon_gpkg = os.path.join(base_dir, "output", "municipality_shapes", f"{mun_safe}_polygon.gpkg")
+    output_base = os.path.join(base_dir, "output")
+
+    project_path = os.path.join(base_dir, "portugal_project.qgz")
+    if not os.path.exists(project_path):
+        project_path = None
 
     print(
-        extract_heatmap(
+        extract_heatmap_qgis(
             municipality=municipality,
-            category="health",
+            category="education",
             pois_gpkg=pois_gpkg,
             pois_layer="pois",
-            polygon_gpkg=polygon_gpkg,
-            polygon_layer="polygon",
-            output_base=os.path.join(base_dir, "output"),
-            cell_size_m=250,
-            add_to_qgis=False,
+            output_base=output_base,
+            project_path=project_path,
+            radius=500,
+            pixel_size=10,
+            add_to_project=True,
         )
     )
