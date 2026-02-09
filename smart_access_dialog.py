@@ -115,7 +115,7 @@ class SmartAccessDialog(QDialog):
 
         self.worker = None
     
-        def show_progress(self):
+    def show_progress(self):
         self.progress_value = 0
         if hasattr(self, "progressBar"):
             self.progressBar.setValue(0)
