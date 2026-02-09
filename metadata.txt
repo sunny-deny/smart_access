@@ -1,7 +1,8 @@
 [general]
-name=Smart Acess
+name=Smart Access
 description=An accessibility analysis plugin
 version=1.0
 qgisMinimumVersion=3.0
 author=Denise Taúla
 email=dtaula0@gmail.com
+repository=https://github.com/sunny-deny/smart_access.git
