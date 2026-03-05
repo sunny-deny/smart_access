@@ -216,7 +216,7 @@ C:\Users\<USER>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\
 
 ### 3. Clone the Repository
 
-Clone the project repository and rename the folder to `Smart Access`:
+Clone the project repository and rename the folder to `SmartAccess`:
 
 ```bash
 git clone https://github.com/sunny-deny/smart_access.git
@@ -226,7 +226,7 @@ git clone https://github.com/sunny-deny/smart_access.git
 
 1. Open QGIS
 2. Go to **Plugins → Manage and Install Plugins**
-3. Enable **Smart Access**
+3. Enable **SmartAccess**
 4. The plugin will appear in the toolbar
 
 ---
@@ -235,7 +235,7 @@ git clone https://github.com/sunny-deny/smart_access.git
 
 ### 1. Open Plugin
 
-Click the **Smart Access** icon in QGIS.
+Click the **SmartAccess** icon in QGIS.
 
 ### 2. Select Parameters
 
@@ -307,11 +307,7 @@ Files are saved in GeoPackage format (`.gpkg`).
 ## Limitations
 
 - Public transport isochrones are approximations (no GTFS routing)
-- Network download requires internet access
 - Large municipalities may require longer processing time
-- Driving mode uses simplified speed models
-
-These limitations are discussed in the project report.
 
 ---
 
